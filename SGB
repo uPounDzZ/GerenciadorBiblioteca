@@ -151,7 +151,7 @@ class TelaUsuario:
         id = int(input("ID do usuário: "))
         try:
             self.usuario_service.desbloquear_usuario(id)
-            print("\nUsuário desbloqueado com sucesso!")
+            print(f"\nPronto! O usuário {usuario.nome } foi desbloqueado com sucesso!")
         except ValueError as e:
             print(f"\nErro: {e}")
 
