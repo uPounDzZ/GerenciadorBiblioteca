@@ -1,0 +1,402 @@
+
+import sys
+import os
+
+sys.path.append(os.path.abspath('./biblioteca'))
+
+
+class Usuario:
+    def __init__(self, id, nome, email, senha, tipo="REGULAR"):  
+        self.id = id
+        self.nome = nome
+        self.email = email
+        self.senha = senha
+        self.tipo = tipo
+        self.status = "ATIVO"
+
+    def __str__(self):  
+        return f"ID: {self.id} | Nome: {self.nome} | Email: {self.email} | Tipo: {self.tipo} | Status: {self.status}"
+
+
+
+
+class UsuarioDAO:
+    _instancia = None
+
+    @classmethod
+    def get_instancia(cls):
+        if cls._instancia is None:
+            cls._instancia = UsuarioDAO()
+        return cls._instancia
+
+    def __init__(self):  # Corrigido: __init__
+        self.usuarios = {}
+        self.proximo_id = 1
+        self.adicionar(Usuario(0, "Admin", "admin@biblioteca.com", "admin123", "BIBLIOTECARIO"))
+
+    def adicionar(self, usuario):
+        if usuario.id == 0:
+            self.usuarios[0] = usuario
+            return usuario
+        usuario.id = self.proximo_id
+        self.usuarios[self.proximo_id] = usuario
+        self.proximo_id += 1
+        return usuario
+
+    def buscar_por_id(self, id):
+        return self.usuarios.get(id)
+
+    def buscar_por_email(self, email):
+        for usuario in self.usuarios.values():
+            if usuario.email == email:
+                return usuario
+        return None
+
+    def listar_todos(self):
+        return list(self.usuarios.values())
+
+    def atualizar(self, usuario):
+        if usuario.id in self.usuarios:
+            self.usuarios[usuario.id] = usuario
+            return True
+        return False
+
+    def remover(self, id):
+        if id in self.usuarios:
+            del self.usuarios[id]
+            return True
+        return False
+
+
+
+from biblioteca.core.persistencia.usuario_dao import UsuarioDAO
+
+class UsuarioService:
+    def __init__(self):  # Corrigido: __init__
+        self.usuario_dao = UsuarioDAO.get_instancia()
+
+    def adicionar_usuario(self, nome, email, senha, tipo="REGULAR"):
+        if self.usuario_dao.buscar_por_email(email):
+            raise ValueError("Já existe um usuário com este email")
+        usuario = Usuario(0, nome, email, senha, tipo)
+        return self.usuario_dao.adicionar(usuario)
+
+    def bloquear_usuario(self, id):
+        usuario = self.usuario_dao.buscar_por_id(id)
+        if not usuario:
+            raise ValueError("Usuário não encontrado")
+        usuario.status = "BLOQUEADO"
+        return self.usuario_dao.atualizar(usuario)
+
+    def desbloquear_usuario(self, id):
+        usuario = self.usuario_dao.buscar_por_id(id)
+        if not usuario:
+            raise ValueError("Usuário não encontrado")
+        usuario.status = "ATIVO"
+        return self.usuario_dao.atualizar(usuario)
+
+    def listar_todos_usuarios(self):
+        return self.usuario_dao.listar_todos()
+
+    def autenticar(self, email, senha):
+        usuario = self.usuario_dao.buscar_por_email(email)
+        if usuario and usuario.senha == senha:
+            if usuario.status == "BLOQUEADO":
+                raise ValueError("Usuário bloqueado")
+            return usuario
+        return None
+
+
+class TelaUsuario:
+    def __init__(self, usuario_service):  # Corrigido: __init__
+        self.usuario_service = usuario_service
+
+    def exibir_menu(self):
+        print("\n=== GERENCIAMENTO DE USUÁRIOS ===")
+        print("1. Adicionar novo usuário")
+        print("2. Bloquear usuário")
+        print("3. Desbloquear usuário")
+        print("4. Listar todos os usuários")
+        print("0. Voltar")
+        return input("Escolha uma opção: ")
+
+    def adicionar_usuario(self):
+        print("\n=== ADICIONAR NOVO USUÁRIO ===")
+        nome = input("Nome: ")
+        email = input("Email: ")
+        senha = input("Senha: ")
+        tipo = input("Tipo (REGULAR ou BIBLIOTECARIO): ").upper()
+        if tipo not in ["REGULAR", "BIBLIOTECARIO"]:
+            tipo = "REGULAR"
+        try:
+            usuario = self.usuario_service.adicionar_usuario(nome, email, senha, tipo)
+            print(f"\nUsuário adicionado com sucesso! ID: {usuario.id}")
+        except ValueError as e:
+            print(f"\nErro: {e}")
+
+    def bloquear_usuario(self):
+        print("\n=== BLOQUEAR USUÁRIO ===")
+        id = int(input("ID do usuário: "))
+        try:
+            self.usuario_service.bloquear_usuario(id)
+            print("\nUsuário bloqueado com sucesso!")
+        except ValueError as e:
+            print(f"\nErro: {e}")
+
+    def desbloquear_usuario(self):
+        print("\n=== DESBLOQUEAR USUÁRIO ===")
+        id = int(input("ID do usuário: "))
+        try:
+            self.usuario_service.desbloquear_usuario(id)
+            print("\nUsuário desbloqueado com sucesso!")
+        except ValueError as e:
+            print(f"\nErro: {e}")
+
+    def listar_usuarios(self):
+        print("\n=== LISTA DE USUÁRIOS ===")
+        usuarios = self.usuario_service.listar_todos_usuarios()
+        if not usuarios:
+            print("Nenhum usuário cadastrado.")
+        else:
+            for usuario in usuarios:
+                print(usuario)
+
+
+
+
+class MenuPrincipal:
+    def __init__(self):  # Corrigido: __init__
+        self.usuario_service = UsuarioService()
+        self.tela_usuario = TelaUsuario(self.usuario_service)
+
+    def exibir_menu(self):
+        while True:
+            print("\n=== SISTEMA DE BIBLIOTECA ===")
+            print("1. Gerenciar Usuários")
+            print("2. Gerenciar Livros")
+            print("3. Gerenciar Empréstimos")
+            print("0. Sair")
+
+            opcao = input("Escolha uma opção: ")
+            if opcao == "1":
+                self.menu_usuarios()
+            elif opcao == "2":
+                print("Funcionalidade não implementada")
+            elif opcao == "3":
+                print("Funcionalidade não implementada")
+            elif opcao == "0":
+                print("Saindo do sistema...")
+                break
+            else:
+                print("Opção inválida!")
+
+    def menu_usuarios(self):
+        while True:
+            opcao = self.tela_usuario.exibir_menu()
+            if opcao == "1":
+                self.tela_usuario.adicionar_usuario()
+            elif opcao == "2":
+                self.tela_usuario.bloquear_usuario()
+            elif opcao == "3":
+                self.tela_usuario.desbloquear_usuario()
+            elif opcao == "4":
+                self.tela_usuario.listar_usuarios()
+            elif opcao == "0":
+                break
+            else:
+                print("Opção inválida!")
+
+
+
+
+from biblioteca.interface.menus import MenuPrincipal
+
+def main():
+    menu = MenuPrincipal()
+    menu.exibir_menu()
+
+
+if __name__ == "__main__":
+    main()
+
+class ValidationException(Exception):
+    pass
+
+class LoginInvalidoException(ValidationException):
+    def __init__(self, mensagem="Login inválido"):
+        self.mensagem = mensagem
+        super().__init__(self.mensagem)
+
+class SenhaInvalidaException(ValidationException):
+    def __init__(self, mensagem="Senha inválida"):
+        self.mensagem = mensagem
+        super().__init__(self.mensagem)
+
+class UsuarioJaExisteException(ValidationException):
+    def __init__(self, mensagem="Usuário já existe"):
+        self.mensagem = mensagem
+        super().__init__(self.mensagem)
+
+class UsuarioNaoEncontradoException(ValidationException):
+    def __init__(self, mensagem="Usuário não encontrado"):
+        self.mensagem = mensagem
+        super().__init__(self.mensagem)
+
+
+
+class Usuario:
+    def __init__(self, login, senha):
+        self.login = login
+        self.senha = senha
+
+
+
+from biblioteca.core.entidades.usuario import Usuario
+class UsuarioDAOMemoria:
+    def __init__(self):
+        self.usuarios = {}
+
+    def adicionar(self, usuario: Usuario):
+        self.usuarios[usuario.login] = usuario
+
+    def buscar(self, login):
+        return self.usuarios.get(login)
+
+    def listar(self):
+        return list(self.usuarios.values())
+
+
+import json
+import os
+from biblioteca.core.entidades.usuario import Usuario
+
+
+class UsuarioDAOArquivo:
+    def __init__(self, arquivo='usuarios.json'):
+        self.arquivo = arquivo
+        self.usuarios = self._carregar()
+
+    def _carregar(self):
+        if os.path.exists(self.arquivo):
+            with open(self.arquivo, 'r') as f:
+                dados = json.load(f)
+                return {login: Usuario(login, info['senha']) for login, info in dados.items()}
+        return {}
+
+    def _salvar(self):
+        with open(self.arquivo, 'w') as f:
+            dados = {login: {'senha': usuario.senha} for login, usuario in self.usuarios.items()}
+            json.dump(dados, f)
+
+    def adicionar(self, usuario: Usuario):
+        self.usuarios[usuario.login] = usuario
+        self._salvar()
+
+    def buscar(self, login):
+        return self.usuarios.get(login)
+
+    def listar(self):
+        return list(self.usuarios.values())
+
+
+
+import os
+from biblioteca.core.entidades.usuario import Usuario
+
+
+class DAOFactory:
+    @staticmethod
+    def criar_usuario_dao():
+        diretorio = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'dados')
+        if not os.path.exists(diretorio):
+            os.makedirs(diretorio)
+        caminho_arquivo = os.path.join(diretorio, 'usuarios.json')
+        return UsuarioDAOArquivo(caminho_arquivo)
+
+
+
+
+
+class UsuarioService:
+    def __init__(self, usuario_dao):
+        self.usuario_dao = usuario_dao
+
+    def cadastrar_usuario(self, login, senha):
+        if self.usuario_dao.buscar(login):
+            raise UsuarioJaExisteException()
+        usuario = Usuario(login, senha)
+        self.usuario_dao.adicionar(usuario)
+
+    def autenticar_usuario(self, login, senha):
+        usuario = self.usuario_dao.buscar(login)
+        if not usuario:
+            raise UsuarioNaoEncontradoException()
+        if usuario.senha != senha:
+            raise SenhaInvalidaException()
+        return True
+
+
+
+class TelaUsuario:
+    def __init__(self):
+        pass
+
+    def mostrar_menu(self):
+        print("\n--- Menu Usuário ---")
+        print("1. Cadastrar")
+        print("2. Login")
+        print("3. Listar usuários")
+        print("0. Voltar")
+        return input("Escolha uma opção: ")
+
+    def coletar_dados_usuario(self):
+        login = input("Login: ")
+        senha = input("Senha: ")
+        return login, senha
+
+    def mostrar_mensagem(self, mensagem):
+        print(mensagem)
+
+
+
+from biblioteca.interface.tela_usuario import TelaUsuario
+from biblioteca.servicos.usuario_service import UsuarioService
+from biblioteca.core.excecoes import *
+from biblioteca.core.entidades.usuario import Usuario
+
+class MenuPrincipal:
+    def __init__(self):
+        dao_usuario = DAOFactory.criar_usuario_dao()
+        self.usuario_service = UsuarioService(dao_usuario)
+        self.tela_usuario = TelaUsuario()
+
+    def executar(self):
+        while True:
+            opcao = self.tela_usuario.mostrar_menu()
+
+            if opcao == '1':
+                login, senha = self.tela_usuario.coletar_dados_usuario()
+                try:
+                    self.usuario_service.cadastrar_usuario(login, senha)
+                    self.tela_usuario.mostrar_mensagem("Usuário cadastrado com sucesso.")
+                except ValidationException as e:
+                    self.tela_usuario.mostrar_mensagem(str(e))
+
+            elif opcao == '2':
+                login, senha = self.tela_usuario.coletar_dados_usuario()
+                try:
+                    if self.usuario_service.autenticar_usuario(login, senha):
+                        self.tela_usuario.mostrar_mensagem("Login bem-sucedido!")
+                except ValidationException as e:
+                    self.tela_usuario.mostrar_mensagem(str(e))
+
+            elif opcao == '3':
+                usuarios = self.usuario_service.usuario_dao.listar()
+                for u in usuarios:
+                    self.tela_usuario.mostrar_mensagem(f"Usuário: {u.login}")
+
+            elif opcao == '0':
+                break
+
+            else:
+                self.tela_usuario.mostrar_mensagem("Opção inválida.")
