@@ -1,0 +1,553 @@
+# biblioteca/servicos/log_service.py
+from biblioteca.core.entidades.log_acesso import LogAcesso
+from biblioteca.core.relatorios.gerador_relatorio_html import GeradorRelatorioHTML
+from biblioteca.core.relatorios.gerador_relatorio_pdf import GeradorRelatorioPDF
+from biblioteca.core.persistencia.factory.dao_factory_provider import DAOFactoryProvider
+
+
+class LogService:
+    def __init__(self, factory=None):
+        if factory is None:
+            factory = DAOFactoryProvider.get_factory()
+
+        # Aqui estamos adicionando log_dao ao factory
+        self.log_dao = factory.criar_log_dao()
+
+    def registrar_acesso(self, usuario_id, acao, detalhes=None):
+        """Registra um novo log de acesso ao sistema"""
+        log = LogAcesso(
+            usuario_id=usuario_id,
+            acao=acao,
+            detalhes=detalhes
+        )
+        return self.log_dao.adicionar(log)
+
+    def buscar_logs_usuario(self, usuario_id):
+        """Busca todos os logs de acesso de um determinado usuário"""
+        return self.log_dao.buscar_por_usuario(usuario_id)
+
+    def gerar_relatorio(self, formato="html", periodo_dias=30):
+        """Gera um relatório de acessos no formato especificado"""
+        if formato.lower() == "html":
+            gerador = GeradorRelatorioHTML(self.log_dao)
+        elif formato.lower() == "pdf":
+            gerador = GeradorRelatorioPDF(self.log_dao)
+        else:
+            raise ValueError(f"Formato de relatório não suportado: {formato}")
+
+        return gerador.gerar_relatorio(periodo_dias)
+
+
+# biblioteca/core/persistencia/arquivo/log_acesso_dao_arquivo.py
+import json
+import os
+from datetime import datetime
+from biblioteca.core.entidades.log_acesso import LogAcesso
+
+
+class LogAcessoDAOArquivo:
+    _instancia = None
+
+    @classmethod
+    def get_instancia(cls):
+        if cls._instancia is None:
+            cls._instancia = LogAcessoDAOArquivo()
+        return cls._instancia
+
+    def __init__(self, arquivo_path='dados/logs_acesso.json'):
+        self.arquivo_path = arquivo_path
+        self.logs = {}
+        self.proximo_id = 1
+        self._carregar()
+
+    def _carregar(self):
+        os.makedirs(os.path.dirname(self.arquivo_path), exist_ok=True)
+
+        if os.path.exists(self.arquivo_path):
+            try:
+                with open(self.arquivo_path, 'r') as arquivo:
+                    dados = json.load(arquivo)
+
+                    # Reconstruir dicionário de logs
+                    self.logs = {}
+                    for id_str, log_dict in dados['logs'].items():
+                        id = int(id_str)
+                        log = LogAcesso(
+                            id=id,
+                            usuario_id=log_dict['usuario_id'],
+                            data_acesso=datetime.strptime(log_dict['data_acesso'], "%Y-%m-%d %H:%M:%S"),
+                            acao=log_dict['acao'],
+                            detalhes=log_dict['detalhes']
+                        )
+                        self.logs[id] = log
+
+                    # Atualizar próximo id
+                    self.proximo_id = dados['proximo_id']
+            except Exception as e:
+                print(f"Erro ao carregar arquivo de logs: {e}")
+                # Inicializa com valores padrão
+                self.logs = {}
+                self.proximo_id = 1
+
+    def _salvar(self):
+        try:
+            os.makedirs(os.path.dirname(self.arquivo_path), exist_ok=True)
+
+            # Converter dicionário de logs para formato JSON
+            logs_dict = {}
+            for id, log in self.logs.items():
+                logs_dict[str(id)] = {
+                    'id': log.id,
+                    'usuario_id': log.usuario_id,
+                    'data_acesso': log.data_acesso.strftime("%Y-%m-%d %H:%M:%S"),
+                    'acao': log.acao,
+                    'detalhes': log.detalhes
+                }
+
+            dados = {
+                'logs': logs_dict,
+                'proximo_id': self.proximo_id
+            }
+
+            with open(self.arquivo_path, 'w') as arquivo:
+                json.dump(dados, arquivo, indent=4)
+        except Exception as e:
+            print(f"Erro ao salvar arquivo de logs: {e}")
+
+    def adicionar(self, log):
+        log.id = self.proximo_id
+        self.logs[self.proximo_id] = log
+        self.proximo_id += 1
+        self._salvar()
+        return log
+
+    def buscar_por_id(self, id):
+        return self.logs.get(id)
+
+    def buscar_por_usuario(self, usuario_id):
+        return [log for log in self.logs.values() if log.usuario_id == usuario_id]
+
+    def listar_todos(self):
+        return list(self.logs.values())
+
+    def buscar_por_periodo(self, data_inicio, data_fim):
+        return [log for log in self.logs.values()
+                if data_inicio <= log.data_acesso <= data_fim]
+
+    def buscar_por_acao(self, acao):
+        return [log for log in self.logs.values() if log.acao == acao]
+
+
+# Atualização nas interfaces DAO Abstract Factory
+# biblioteca/core/persistencia/factory/dao_abstract_factory.py
+from abc import ABC, abstractmethod
+
+
+class DAOAbstractFactory(ABC):
+    @abstractmethod
+    def criar_usuario_dao(self):
+        pass
+
+    @abstractmethod
+    def criar_livro_dao(self):
+        pass
+
+    @abstractmethod
+    def criar_log_dao(self):
+        pass
+
+
+# Atualização das implementações concretas das factories
+# biblioteca/core/persistencia/factory/memoria_dao_factory.py
+from biblioteca.core.persistencia.factory.dao_abstract_factory import DAOAbstractFactory
+from biblioteca.core.persistencia.memoria.usuario_dao_memoria import UsuarioDAOMemoria
+from biblioteca.core.persistencia.memoria.livro_dao_memoria import LivroDAOMemoria
+from biblioteca.core.persistencia.memoria.log_acesso_dao_memoria import LogAcessoDAOMemoria
+
+
+class MemoriaDAOFactory(DAOAbstractFactory):
+    def criar_usuario_dao(self):
+        return UsuarioDAOMemoria.get_instancia()
+
+    def criar_livro_dao(self):
+        return LivroDAOMemoria.get_instancia()
+
+    def criar_log_dao(self):
+        return LogAcessoDAOMemoria.get_instancia()
+
+
+# biblioteca/core/persistencia/factory/arquivo_dao_factory.py
+from biblioteca.core.persistencia.factory.dao_abstract_factory import DAOAbstractFactory
+from biblioteca.core.persistencia.arquivo.usuario_dao_arquivo import UsuarioDAOArquivo
+from biblioteca.core.persistencia.arquivo.livro_dao_arquivo import LivroDAOArquivo
+from biblioteca.core.persistencia.arquivo.log_acesso_dao_arquivo import LogAcessoDAOArquivo
+
+
+class ArquivoDAOFactory(DAOAbstractFactory):
+    def criar_usuario_dao(self):
+        return UsuarioDAOArquivo.get_instancia()
+
+    def criar_livro_dao(self):
+        return LivroDAOArquivo.get_instancia()
+
+    def criar_log_dao(self):
+        return LogAcessoDAOArquivo.get_instancia()
+
+
+# Implementação completa da RelatorioPDF com ReportLab
+# biblioteca/core/relatorios/gerador_relatorio_pdf.py
+from biblioteca.core.relatorios.gerador_relatorio_template import GeradorRelatorioTemplate
+from biblioteca.core.adaptadores.estatisticas_adapter import EstatisticasAdapter
+from datetime import datetime
+
+
+class GeradorRelatorioPDF(GeradorRelatorioTemplate):
+    """Implementação concreta do gerador de relatórios em formato PDF"""
+
+    def __init__(self, log_dao):
+        super().__init__(log_dao)
+        # Nesse caso, usamos o adapter para aproveitar o sistema externo
+        self.adapter = EstatisticasAdapter()
+
+    def _formatar_relatorio(self, estatisticas):
+        """Formata as estatísticas para serem exibidas em PDF"""
+        # Em um caso real, usaríamos uma biblioteca como ReportLab
+        # Para este exemplo, simularemos a geração de PDF com uma string
+
+        conteudo = f"""
+RELATÓRIO DE ACESSOS AO SISTEMA
+Data de Geração: {estatisticas['data_geracao'].strftime('%d/%m/%Y %H:%M:%S')}
+Total de Acessos: {estatisticas['total']}
+
+ACESSOS POR TIPO DE AÇÃO:
+"""
+
+        for acao, quantidade in estatisticas['acoes'].items():
+            percentual = (quantidade / estatisticas['total']) * 100 if estatisticas['total'] > 0 else 0
+            conteudo += f"- {acao}: {quantidade} ({percentual:.2f}%)\n"
+
+        conteudo += "\nACESSOS POR USUÁRIO:\n"
+
+        for usuario_id, quantidade in estatisticas['usuarios'].items():
+            percentual = (quantidade / estatisticas['total']) * 100 if estatisticas['total'] > 0 else 0
+            conteudo += f"- Usuário {usuario_id}: {quantidade} ({percentual:.2f}%)\n"
+
+        conteudo += "\nACESSOS POR DIA:\n"
+
+        for dia, quantidade in sorted(estatisticas['dias'].items()):
+            conteudo += f"- {dia.strftime('%d/%m/%Y')}: {quantidade}\n"
+
+        # Aqui demonstramos o uso do Adapter para processar os dados com o sistema externo
+        dados_formatados = f"ESTATÍSTICAS: Total={estatisticas['total']}, Ações={len(estatisticas['acoes'])}"
+        resultado_externo = self.adapter.formatar_relatorio_externo(dados_formatados, "pdf")
+
+        conteudo += f"\n{resultado_externo}"
+
+        try:
+            # Em um ambiente real, esta parte seria executada para gerar o PDF
+            # Usando ReportLab ou outra biblioteca PDF
+            nome_arquivo = f"relatorio_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf"
+            print(f"Gerando PDF: {nome_arquivo}")
+            # Código de geração do PDF comentado, pois dependeria da instalação do ReportLab
+            # doc = SimpleDocTemplate(nome_arquivo, pagesize=letter)
+            # elements = []
+            # styles = getSampleStyleSheet()
+
+            # # Adicionar título
+            # elements.append(Paragraph("Relatório de Acessos ao Sistema", styles['Title']))
+            # elements.append(Paragraph(f"Data de Geração: {estatisticas['data_geracao'].strftime('%d/%m/%Y %H:%M:%S')}", styles['Normal']))
+            # elements.append(Paragraph(f"Total de Acessos: {estatisticas['total']}", styles['Normal']))
+
+            # # Tabela de ações
+            # elements.append(Paragraph("Acessos por Tipo de Ação", styles['Heading2']))
+            # data = [["Ação", "Quantidade", "Percentual"]]
+            # for acao, quantidade in estatisticas['acoes'].items():
+            #     percentual = (quantidade / estatisticas['total']) * 100 if estatisticas['total'] > 0 else 0
+            #     data.append([acao, str(quantidade), f"{percentual:.2f}%"])
+            # elements.append(Table(data))
+
+            # # Tabela de usuários
+            # elements.append(Paragraph("Acessos por Usuário", styles['Heading2']))
+            # data = [["ID do Usuário", "Quantidade", "Percentual"]]
+            # for usuario_id, quantidade in estatisticas['usuarios'].items():
+            #     percentual = (quantidade / estatisticas['total']) * 100 if estatisticas['total'] > 0 else 0
+            #     data.append([str(usuario_id), str(quantidade), f"{percentual:.2f}%"])
+            # elements.append(Table(data))
+
+            # # Tabela de dias
+            # elements.append(Paragraph("Acessos por Dia", styles['Heading2']))
+            # data = [["Data", "Quantidade"]]
+            # for dia, quantidade in sorted(estatisticas['dias'].items()):
+            #     data.append([dia.strftime('%d/%m/%Y'), str(quantidade)])
+            # elements.append(Table(data))
+
+            # # Gerar o PDF
+            # doc.build(elements)
+
+        except Exception as e:
+            print(f"Erro ao gerar PDF: {e}")
+
+        return conteudo
+
+    def _finalizar_relatorio(self, relatorio):
+        """Sobrescrita do método hook para adicionar comportamento específico para PDF"""
+        super()._finalizar_relatorio(relatorio)
+        print("Arquivo PDF salvo com sucesso!")
+
+
+# Implementação de um novo tipo de relatório XML (extensão do Template Method)
+# biblioteca/core/relatorios/gerador_relatorio_xml.py
+from biblioteca.core.relatorios.gerador_relatorio_template import GeradorRelatorioTemplate
+
+
+class GeradorRelatorioXML(GeradorRelatorioTemplate):
+    """Implementação concreta do gerador de relatórios em formato XML"""
+
+    def _formatar_relatorio(self, estatisticas):
+        """Formata as estatísticas em XML"""
+        xml = f"""<?xml version="1.0" encoding="UTF-8"?>
+<relatorio>
+    <titulo>Relatório de Acessos ao Sistema</titulo>
+    <data_geracao>{estatisticas['data_geracao'].strftime('%Y-%m-%d %H:%M:%S')}</data_geracao>
+    <total_acessos>{estatisticas['total']}</total_acessos>
+
+    <acoes_por_tipo>
+"""
+
+        for acao, quantidade in estatisticas['acoes'].items():
+            percentual = (quantidade / estatisticas['total']) * 100 if estatisticas['total'] > 0 else 0
+            xml += f"""        <acao>
+            <tipo>{acao}</tipo>
+            <quantidade>{quantidade}</quantidade>
+            <percentual>{percentual:.2f}</percentual>
+        </acao>
+"""
+
+        xml += """    </acoes_por_tipo>
+
+    <acessos_por_usuario>
+"""
+
+        for usuario_id, quantidade in estatisticas['usuarios'].items():
+            percentual = (quantidade / estatisticas['total']) * 100 if estatisticas['total'] > 0 else 0
+            xml += f"""        <usuario>
+            <id>{usuario_id}</id>
+            <quantidade>{quantidade}</quantidade>
+            <percentual>{percentual:.2f}</percentual>
+        </usuario>
+"""
+
+        xml += """    </acessos_por_usuario>
+
+    <acessos_por_dia>
+"""
+
+        for dia, quantidade in sorted(estatisticas['dias'].items()):
+            xml += f"""        <dia>
+            <data>{dia.strftime('%Y-%m-%d')}</data>
+            <quantidade>{quantidade}</quantidade>
+        </dia>
+"""
+
+        xml += """    </acessos_por_dia>
+</relatorio>
+"""
+
+        return xml
+
+
+# Correção dos métodos __init__ que estavam como _init_
+# biblioteca/core/entidades/log_acesso.py
+from datetime import datetime
+
+
+class LogAcesso:
+    def __init__(self, id=None, usuario_id=None, data_acesso=None, acao=None, detalhes=None):
+        self.id = id
+        self.usuario_id = usuario_id
+        self.data_acesso = data_acesso if data_acesso else datetime.now()
+        self.acao = acao  # ex: "LOGIN", "CONSULTA_LIVRO", "EMPRESTIMO"
+        self.detalhes = detalhes  # informações adicionais sobre a ação
+
+    def __str__(self):
+        return f"Log #{self.id} - Usuário: {self.usuario_id}, Ação: {self.acao}, Data: {self.data_acesso.strftime('%d/%m/%Y %H:%M:%S')}"
+
+
+# biblioteca/core/adaptadores/estatisticas_adapter.py
+import json
+from biblioteca.infraestrutura.biblioteca_externa import SistemaExterno
+from biblioteca.core.entidades.log_acesso import LogAcesso
+
+
+class EstatisticasAdapter:
+    """Adapter para o sistema externo de estatísticas"""
+
+    def __init__(self):
+        self.sistema_externo = SistemaExterno()
+
+    def gerar_estatisticas(self, logs_acesso):
+        """Converte logs de acesso para o formato esperado pelo sistema externo e processa"""
+        dados_formatados = self._converter_para_formato_externo(logs_acesso)
+        return self.sistema_externo.processar_estatisticas(dados_formatados)
+
+    def _converter_para_formato_externo(self, logs_acesso):
+        """Converte logs para o formato JSON esperado pelo sistema externo"""
+        dados_convertidos = []
+
+        for log in logs_acesso:
+            dados_convertidos.append({
+                "usuario_id": log.usuario_id,
+                "data_acesso": log.data_acesso.strftime("%Y-%m-%d %H:%M:%S"),
+                "acao": log.acao,
+                "detalhes": log.detalhes
+            })
+
+        return json.dumps(dados_convertidos)
+
+    def formatar_relatorio_externo(self, dados, formato="xml"):
+        """Adapta a formatação de relatório usando o sistema externo"""
+        return self.sistema_externo.formatar_relatorio(dados, formato)
+
+
+# Exemplo de classe para demonstrar o uso da aplicação
+# biblioteca/aplicacao/app.py
+from biblioteca.core.persistencia.factory.dao_factory_provider import DAOFactoryProvider
+from biblioteca.core.entidades.usuario import Usuario
+from biblioteca.core.entidades.livro import Livro
+from biblioteca.servicos.log_service import LogService
+from datetime import datetime, timedelta
+import random
+
+
+class AplicacaoBiblioteca:
+    """Classe principal da aplicação para exemplificar o uso dos padrões implementados"""
+
+    def __init__(self, tipo_persistencia="arquivo"):
+        # Utilizando Abstract Factory para criar DAOs
+        self.factory = DAOFactoryProvider.get_factory(tipo_persistencia)
+        self.usuario_dao = self.factory.criar_usuario_dao()
+        self.livro_dao = self.factory.criar_livro_dao()
+        self.log_service = LogService(self.factory)
+
+    def executar_demo(self):
+        """Executa uma demonstração dos recursos da biblioteca"""
+        print("=== SISTEMA DE BIBLIOTECA - DEMONSTRAÇÃO ===")
+
+        # Criar alguns usuários
+        admin = self.usuario_dao.buscar_por_email("admin@biblioteca.com")
+        if not admin:
+            admin = self.usuario_dao.adicionar(Usuario(0, "Admin", "admin@biblioteca.com", "admin123", "BIBLIOTECARIO"))
+
+        usuario1 = self.usuario_dao.adicionar(Usuario(0, "João Silva", "joao@exemplo.com", "senha123", "ALUNO"))
+        usuario2 = self.usuario_dao.adicionar(Usuario(0, "Maria Santos", "maria@exemplo.com", "senha456", "PROFESSOR"))
+
+        # Registrar logs de login
+        self.log_service.registrar_acesso(admin.id, "LOGIN", "Login do administrador")
+        self.log_service.registrar_acesso(usuario1.id, "LOGIN", "Login do aluno")
+        self.log_service.registrar_acesso(usuario2.id, "LOGIN", "Login do professor")
+
+        # Adicionar alguns livros
+        livro1 = self.livro_dao.adicionar(
+            Livro(0, "Python para Todos", "Charles Severance", "9781449359362", 2018, "Programação"))
+        livro2 = self.livro_dao.adicionar(
+            Livro(0, "Padrões de Projeto", "Erich Gamma et al.", "9788573076103", 1995, "Engenharia de Software"))
+        livro3 = self.livro_dao.adicionar(
+            Livro(0, "Banco de Dados", "Carlos Alberto Heuser", "9788577807956", 2009, "Computação"))
+
+        # Registrar logs de consulta e empréstimos
+        self.log_service.registrar_acesso(usuario1.id, "CONSULTA_LIVRO", f"Consultou: {livro1.titulo}")
+        self.log_service.registrar_acesso(usuario1.id, "EMPRESTIMO", f"Emprestou: {livro1.titulo}")
+
+        self.log_service.registrar_acesso(usuario2.id, "CONSULTA_LIVRO", f"Consultou: {livro2.titulo}")
+        self.log_service.registrar_acesso(usuario2.id, "EMPRESTIMO", f"Emprestou: {livro2.titulo}")
+        self.log_service.registrar_acesso(usuario2.id, "CONSULTA_LIVRO", f"Consultou: {livro3.titulo}")
+
+        # Simular mais alguns acessos em datas anteriores para o relatório
+        data_base = datetime.now()
+        for i in range(1, 30):
+            data = data_base - timedelta(days=i)
+            usuario_id = random.choice([admin.id, usuario1.id, usuario2.id])
+            acao = random.choice(["LOGIN", "CONSULTA_LIVRO", "EMPRESTIMO", "DEVOLUCAO", "SAIDA"])
+
+            log = self.log_service.log_dao.adicionar(LogAcesso(
+                usuario_id=usuario_id,
+                data_acesso=data,
+                acao=acao,
+                detalhes=f"Ação simulada para relatório: {acao}"
+            ))
+
+        # Gerar relatórios usando o Template Method
+        print("\n=== GERANDO RELATÓRIOS DE ACESSO ===")
+        relatorio_html = self.log_service.gerar_relatorio("html")
+        print("Relatório HTML gerado com sucesso!")
+
+        relatorio_pdf = self.log_service.gerar_relatorio("pdf")
+        print("Relatório PDF gerado com sucesso!")
+
+        # Demonstrando uso do Adapter
+        print("\n=== DEMONSTRANDO USO DO ADAPTER ===")
+        from biblioteca.core.adaptadores.estatisticas_adapter import EstatisticasAdapter
+
+        adapter = EstatisticasAdapter()
+        logs = self.log_service.log_dao.listar_todos()
+        resultado = adapter.gerar_estatisticas(logs)
+        print(f"Resultado do sistema externo via adapter: {resultado}")
+
+        print("\n=== DEMONSTRAÇÃO CONCLUÍDA ===")
+
+
+# Classe para construir o livro (necessária para a aplicação)
+# biblioteca/core/entidades/livro.py
+class Livro:
+    def __init__(self, id=0, titulo="", autor="", isbn="", ano_publicacao=0, categoria="", disponivel=True,
+                 usuario_id=None):
+        self.id = id
+        self.titulo = titulo
+        self.autor = autor
+        self.isbn = isbn
+        self.ano_publicacao = ano_publicacao
+        self.categoria = categoria
+        self.disponivel = disponivel
+        self.usuario_id = usuario_id
+
+    def __str__(self):
+        status = "Disponível" if self.disponivel else "Emprestado"
+        return f"Livro #{self.id} - {self.titulo} ({self.autor}, {self.ano_publicacao}) - {status}"
+
+
+# Classe para definir o usuário (necessária para a aplicação)
+# biblioteca/core/entidades/usuario.py
+class Usuario:
+    def __init__(self, id=0, nome="", email="", senha="", tipo="LEITOR", status="ATIVO"):
+        self.id = id
+        self.nome = nome
+        self.email = email
+        self.senha = senha
+        self.tipo = tipo  # LEITOR, BIBLIOTECARIO, ALUNO, PROFESSOR
+        self.status = status  # ATIVO, INATIVO, BLOQUEADO
+
+    def __str__(self):
+        return f"Usuário #{self.id} - {self.nome} ({self.email}) - {self.tipo}"
+
+
+# Exemplo de programa principal para iniciar a aplicação
+# main.py
+def main():
+    from biblioteca.aplicacao.app import AplicacaoBiblioteca
+
+    print("Iniciando aplicação de demonstração...")
+    print("Escolha o tipo de persistência:")
+    print("1 - Memória")
+    print("2 - Arquivo")
+
+    escolha = input("Opção: ")
+    tipo_persistencia = "memoria" if escolha == "1" else "arquivo"
+
+    app = AplicacaoBiblioteca(tipo_persistencia)
+    app.executar_demo()
+
+    print("Programa finalizado.")
+
+
+if __name__ == "__main__":
+    main()
