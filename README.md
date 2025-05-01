@@ -42,7 +42,7 @@ git clone https://github.com/uPounDzZ/GerenciadorBiblioteca.git
 cd GerenciadorBiblioteca
 ```
 2. Acesso padrão para admin
-   Login: admin
-   Senha: Admin123!
+   - Login: admin
+   - Senha: Admin123!
 
 
