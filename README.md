@@ -41,4 +41,8 @@ O sistema tem como objetivo simular o funcionamento básico de uma biblioteca di
 git clone https://github.com/uPounDzZ/GerenciadorBiblioteca.git
 cd GerenciadorBiblioteca
 
+2.Acesso de admin padrão:
+Login: admin
+Senha: Admin123!
+
 
